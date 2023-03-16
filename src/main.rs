@@ -10,7 +10,9 @@ async fn main() {
         .serve(app.into_make_service())
         .await
     {
-        _ => (),
+        _ => (), // this is a gross way of getting rust to stop yelling at us for not handling errors.
+                 // to be fair, this is also a gross way of (not) handling errors.
+                 // FIXME: handle errors (sigh)
     };
 }
 
