@@ -5,23 +5,23 @@ use authstate::AuthState;
 use authstate::Token;
 
 use axum::http::HeaderMap;
-use axum::http::Response;
+
 use axum::response::IntoResponse;
-use axum::{extract::Query, response::Redirect, routing::get, Router};
+use axum::{extract::Query, routing::get, Router};
 
 use parking_lot::Mutex;
 
 use reqwest::header;
 use reqwest::StatusCode;
 
-use serde::Deserializer;
-use serde_json::json;
-use serde_json::map::Values;
-use serde_json::value::RawValue;
+
+
+
+
 use serde_json::{self, Value};
 
-use spotify::read_token_from_file;
-use spotify::Credentials;
+
+
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -79,7 +79,7 @@ async fn main() {
 /// These are wrapped in Arc-mutexes in case two people try to load my website at the same time (unlikely!)
 /// We need to pass the token through as a MutexGuard since we'll be writing to it and don't want to disrupt any ongoing reads.
 async fn authorize(tokens: Arc<AuthState>) -> impl IntoResponse {
-    if (tokens.retrieve(Token::AccessToken).eq(&String::new())) {
+    if tokens.retrieve(Token::AccessToken).eq(&String::new()) {
         tokens.write(
             Token::StateToken,
             rand::thread_rng()
@@ -158,7 +158,7 @@ async fn write_tokens(tokens: Arc<AuthState>, query: Query<Value>) -> String {
     match query.get("state") {
         None => panic!("Should have gotten a state back from the auth code request!"),
         Some(s) => {
-            if (tokens.retrieve(Token::StateToken) != s.as_str().unwrap()) {
+            if tokens.retrieve(Token::StateToken) != s.as_str().unwrap() {
                 panic!(
                     "Received an incorrect state of {} when expecting {}!",
                     s,

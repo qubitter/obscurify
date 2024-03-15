@@ -1,6 +1,6 @@
-use axum::http::HeaderMap;
+
 use reqwest::{self, Response, Url};
-use reqwest::{header, Client};
+use reqwest::{header};
 
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -126,7 +126,7 @@ pub fn get_authorization_code(
     let mut chars = param_string.as_str().chars();
     chars.next_back();
 
-    let mut param_string = chars.as_str();
+    let param_string = chars.as_str();
 
     let mut url_string: String = String::new();
     url_string.push_str(ACCOUNTS_BASE);
