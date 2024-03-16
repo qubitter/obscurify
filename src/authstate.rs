@@ -7,6 +7,7 @@ pub enum Token {
     StateToken,
 }
 
+#[derive(Debug)]
 pub struct AuthState {
     pub access_token: Mutex<String>,
     pub refresh_token: Mutex<String>,

@@ -14,16 +14,10 @@ use parking_lot::Mutex;
 use reqwest::header;
 use reqwest::StatusCode;
 
-
-
-
-
 use serde_json::{self, Value};
 
-
-
-
 use std::net::SocketAddr;
+use std::ptr::null;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -79,7 +73,7 @@ async fn main() {
 /// These are wrapped in Arc-mutexes in case two people try to load my website at the same time (unlikely!)
 /// We need to pass the token through as a MutexGuard since we'll be writing to it and don't want to disrupt any ongoing reads.
 async fn authorize(tokens: Arc<AuthState>) -> impl IntoResponse {
-    if tokens.retrieve(Token::AccessToken).eq(&String::new()) {
+    if tokens.retrieve(Token::StateToken).eq(&String::new()) {
         tokens.write(
             Token::StateToken,
             rand::thread_rng()
@@ -123,9 +117,6 @@ async fn get_current_track_id(tokens: Arc<AuthState>) -> impl IntoResponse {
         TRACK_URL,
     )
     .await;
-
-    dbg!("here");
-    dbg!(resp.status());
 
     match resp.status() {
         StatusCode::NO_CONTENT => StatusCode::NO_CONTENT.into_response(),
@@ -183,8 +174,6 @@ async fn write_tokens(tokens: Arc<AuthState>, query: Query<Value>) -> String {
                     .await
                     .expect("Failed to parse JSON of authorization code redemption response!");
 
-                dbg!(response_json.clone());
-
                 let mut access_token = response_json["access_token"].to_string();
                 access_token.pop();
                 access_token.remove(0);
@@ -204,11 +193,11 @@ async fn write_tokens(tokens: Arc<AuthState>, query: Query<Value>) -> String {
 
                 task::spawn(async move {
                     loop {
-                        refresh_tokens(
-                            tokens.clone(),
-                            Duration::from_secs(response_json["expires_in"].as_u64().unwrap()),
-                        )
-                        .await
+                        time::sleep(Duration::from_secs(
+                            response_json["expires_in"].as_u64().unwrap() - 300,
+                        ))
+                        .await;
+                        refresh_tokens(tokens.clone()).await
                     }
                 });
                 return "Successfully authorized! You can close this page now.".to_owned();
@@ -217,16 +206,45 @@ async fn write_tokens(tokens: Arc<AuthState>, query: Query<Value>) -> String {
     }
 }
 
-async fn refresh_tokens(tokens: Arc<AuthState>, duration: Duration) -> () {
-    time::sleep(Duration::from_secs(duration.as_secs() - 300)).await;
+async fn refresh_tokens(tokens: Arc<AuthState>) -> () {
     let response = spotify::redeem_authorization_code_for_access_token(
         tokens.retrieve(Token::RefreshToken).as_str(),
-        spotify::read_token_from_file(None),
-        "/authorized",
+        spotify::read_creds_from_file(None),
+        REDIRECT_URI,
         true,
     )
     .await;
+
     let json = response.json::<Value>().await.unwrap();
-    tokens.write(Token::AccessToken, json["access_token"].to_string());
-    tokens.write(Token::TokenDuration, json["expires_in"].to_string());
+
+    tokens.write(
+        Token::AccessToken,
+        strip_quotes(&json["access_token"].to_string()),
+    );
+    tokens.write(
+        Token::TokenDuration,
+        strip_quotes(&json["expires_in"].to_string()),
+    );
+    let reftok = json["refresh_token"].to_string();
+    if (strip_quotes(&reftok) != "null") {
+        tokens.write(
+            Token::RefreshToken,
+            strip_quotes(&json["refresh_token"].to_string()),
+        )
+    }
+}
+
+fn strip_quotes(problematic_string: &String) -> String {
+    let mut local_problem = problematic_string.clone();
+    while (local_problem.chars().nth(0) == Some('\"') || local_problem.chars().nth(0) == Some('\''))
+    {
+        local_problem.remove(0);
+    }
+
+    while (local_problem.chars().last() == Some('\"') || local_problem.chars().last() == Some('\''))
+    {
+        local_problem.pop();
+    }
+
+    return local_problem;
 }

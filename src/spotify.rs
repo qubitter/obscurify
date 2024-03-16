@@ -1,6 +1,6 @@
-
+use axum::http::HeaderMap;
 use reqwest::{self, Response, Url};
-use reqwest::{header};
+use reqwest::{header, Client};
 
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -126,7 +126,7 @@ pub fn get_authorization_code(
     let mut chars = param_string.as_str().chars();
     chars.next_back();
 
-    let param_string = chars.as_str();
+    let mut param_string = chars.as_str();
 
     let mut url_string: String = String::new();
     url_string.push_str(ACCOUNTS_BASE);
@@ -146,14 +146,18 @@ pub async fn redeem_authorization_code_for_access_token(
     refresh: bool,
 ) -> reqwest::Response {
     let mut params: HashMap<&str, &str> = HashMap::new();
-    params.insert("grant_type", {
+    params.insert(
+        "grant_type",
         if refresh {
             "refresh_token"
         } else {
             "authorization_code"
-        }
-    });
-    params.insert("code", authorization_code);
+        },
+    );
+    params.insert(
+        if !refresh { "code" } else { "refresh_token" },
+        authorization_code,
+    );
     params.insert("redirect_uri", redirect);
 
     return build_client(None)
