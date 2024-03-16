@@ -6,18 +6,17 @@ use authstate::Token;
 
 use axum::http::HeaderMap;
 
+use axum::http::header;
 use axum::response::IntoResponse;
 use axum::{extract::Query, routing::get, Router};
 
-use parking_lot::Mutex;
+use reqwest::StatusCode as reqsc;
 
-use reqwest::header;
-use reqwest::StatusCode;
+use parking_lot::Mutex;
 
 use serde_json::{self, Value};
 
 use std::net::SocketAddr;
-use std::ptr::null;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -58,10 +57,7 @@ async fn main() {
             }),
         );
     let addr = SocketAddr::from(([127, 0, 0, 1], 80));
-    match axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-    {
+    match axum_server::bind(addr).serve(app.into_make_service()).await {
         _ => (), // this is a gross way of getting rust to stop yelling at us for not handling errors.
                  // to be fair, this is also a gross way of (not) handling errors.
                  // FIXME: handle errors (sigh)
@@ -119,8 +115,8 @@ async fn get_current_track_id(tokens: Arc<AuthState>) -> impl IntoResponse {
     .await;
 
     match resp.status() {
-        StatusCode::NO_CONTENT => StatusCode::NO_CONTENT.into_response(),
-        StatusCode::OK => {
+        reqsc::NO_CONTENT => axum::http::StatusCode::NO_CONTENT.into_response(),
+        reqsc::OK => {
             let mut headers = HeaderMap::new();
             headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
             // FIXME: Make this logging arbitrary for request type.
@@ -138,7 +134,7 @@ async fn get_current_track_id(tokens: Arc<AuthState>) -> impl IntoResponse {
             )
                 .into_response()
         }
-        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(), // don't worry about it
+        _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(), // don't worry about it
     }
 }
 
@@ -226,7 +222,7 @@ async fn refresh_tokens(tokens: Arc<AuthState>) -> () {
         strip_quotes(&json["expires_in"].to_string()),
     );
     let reftok = json["refresh_token"].to_string();
-    if (strip_quotes(&reftok) != "null") {
+    if strip_quotes(&reftok) != "null" {
         tokens.write(
             Token::RefreshToken,
             strip_quotes(&json["refresh_token"].to_string()),
@@ -236,12 +232,12 @@ async fn refresh_tokens(tokens: Arc<AuthState>) -> () {
 
 fn strip_quotes(problematic_string: &String) -> String {
     let mut local_problem = problematic_string.clone();
-    while (local_problem.chars().nth(0) == Some('\"') || local_problem.chars().nth(0) == Some('\''))
+    while local_problem.chars().nth(0) == Some('\"') || local_problem.chars().nth(0) == Some('\'')
     {
         local_problem.remove(0);
     }
 
-    while (local_problem.chars().last() == Some('\"') || local_problem.chars().last() == Some('\''))
+    while local_problem.chars().last() == Some('\"') || local_problem.chars().last() == Some('\'')
     {
         local_problem.pop();
     }
