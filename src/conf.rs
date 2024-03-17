@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::str::FromStr;
 
-// #[derive(Clone)]
+#[derive(Clone)]
 pub struct Config {
     pub https: Option<HTTPSConfig>,
     pub routing: HashMap<String, (IpAddr, u16)>,
@@ -13,11 +13,11 @@ pub struct Config {
 }
 #[derive(Clone)]
 pub struct Service {
-    pub name: String,
     pub domain: String,
     pub target: String,
     pub endpoint: String,
     pub extract: String,
+    pub uri: String,
     pub redirect: String,
 }
 
@@ -41,14 +41,14 @@ pub fn parse_args_and_render_config() -> Result<Config, String> {
 
     let map = config.load(match pargs.free_from_str() {
         Ok(path) => path,
-        Error => String::from("./obsc.conf"),
+        _ => String::from("./obsc.conf"),
     })?;
 
     let out = Config {
         https: match map.get("https") {
             Some(data) => Some(HTTPSConfig {
-                cert: PathBuf::from(data.get("cert").unwrap().as_ref().unwrap()),
-                key: PathBuf::from(data.get("key").unwrap().as_ref().unwrap()),
+                cert: PathBuf::from(data.get("cert").unwrap().as_ref().unwrap().trim()),
+                key: PathBuf::from(data.get("key").unwrap().as_ref().unwrap().trim()),
             }),
             None => None,
         },
@@ -90,11 +90,6 @@ pub fn parse_args_and_render_config() -> Result<Config, String> {
         },
         service: match map.get("service") {
             Some(svc) => Service {
-                name: svc
-                    .get("name")
-                    .expect("Services need names!")
-                    .to_owned()
-                    .unwrap(),
                 domain: svc
                     .get("domain")
                     .expect("Services need domains, too!")
@@ -111,6 +106,7 @@ pub fn parse_args_and_render_config() -> Result<Config, String> {
                     .expect("And redirects!")
                     .to_owned()
                     .unwrap(),
+                uri: svc.get("uri").expect("And a URI!").to_owned().unwrap(),
                 extract: svc
                     .get("extract")
                     .expect("And extracted JSON!")

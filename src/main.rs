@@ -1,5 +1,6 @@
 mod authstate;
 mod conf;
+mod serve;
 mod spotify;
 
 use authstate::AuthState;
@@ -11,6 +12,7 @@ use axum::http::header;
 use axum::response::IntoResponse;
 use axum::{extract::Query, routing::get, Router};
 
+use axum_server::tls_rustls::RustlsConfig;
 use conf::parse_args_and_render_config;
 use conf::Config;
 use conf::Service;
@@ -36,13 +38,14 @@ use rand::{distributions::Alphanumeric, Rng};
 // const TRACK_URL: &str = "me/player/currently_playing";
 
 lazy_static! {
-    static ref CONFIG: Config = { parse_args_and_render_config().unwrap() };
-    static ref REDIRECT_URI: String = { CONFIG.service.redirect.clone() };
+    static ref CONFIG: Config = parse_args_and_render_config().unwrap();
+    static ref REDIRECT_URI: String = CONFIG.service.redirect.clone();
 }
 
 #[tokio::main]
 async fn main() {
     let svc = CONFIG.service.clone();
+    let https = CONFIG.https.clone();
     let tokens: Arc<AuthState> = Arc::new(AuthState {
         access_token: Mutex::new(String::new()),
         refresh_token: Mutex::new(String::new()),
@@ -82,15 +85,21 @@ async fn main() {
                 write_tokens(azd, query.unwrap()).await
             }),
         );
-    let addr = SocketAddr::from((
-        CONFIG.routing.get("http").unwrap().0,
-        CONFIG.routing.get("http").unwrap().1,
-    ));
-    match axum_server::bind(addr).serve(app.into_make_service()).await {
-        _ => (), // this is a gross way of getting rust to stop yelling at us for not handling errors.
-                 // to be fair, this is also a gross way of (not) handling errors.
-                 // FIXME: handle errors (sigh)
-    };
+    match https {
+        Some(https_config) => {
+            tokio::spawn(serve::https_server(https_config, app, CONFIG.clone()));
+            tokio::spawn(serve::http_server(CONFIG.clone()));
+        }
+        None => {
+            let addr = SocketAddr::from((
+                CONFIG.routing.get("http").unwrap().0,
+                CONFIG.routing.get("http").unwrap().1,
+            ));
+            match axum_server::bind(addr).serve(app.into_make_service()).await {
+                _ => (),
+            }
+        }
+    }
 }
 
 /// Generates a new OAuth token if it doesn't exist.
