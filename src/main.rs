@@ -1,4 +1,5 @@
 mod authstate;
+mod conf;
 mod spotify;
 
 use authstate::AuthState;
@@ -10,11 +11,19 @@ use axum::http::header;
 use axum::response::IntoResponse;
 use axum::{extract::Query, routing::get, Router};
 
+use conf::parse_args_and_render_config;
+use conf::Config;
+use conf::Service;
+
+use lazy_static::lazy_static;
+
+use reqwest::Response;
 use reqwest::StatusCode as reqsc;
 
 use parking_lot::Mutex;
 
 use serde_json::{self, Value};
+use spotify::get_api_endpoint;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,11 +33,16 @@ use tokio::{task, time};
 
 use rand::{distributions::Alphanumeric, Rng};
 
-const TRACK_URL: &str = "me/player/currently_playing";
-const REDIRECT_URI: &str = "http://127.0.0.1/authorized";
+// const TRACK_URL: &str = "me/player/currently_playing";
+
+lazy_static! {
+    static ref CONFIG: Config = { parse_args_and_render_config().unwrap() };
+    static ref REDIRECT_URI: String = { CONFIG.service.redirect.clone() };
+}
 
 #[tokio::main]
 async fn main() {
+    let svc = CONFIG.service.clone();
     let tokens: Arc<AuthState> = Arc::new(AuthState {
         access_token: Mutex::new(String::new()),
         refresh_token: Mutex::new(String::new()),
@@ -40,8 +54,20 @@ async fn main() {
     let aut = tokens.clone(); // refcounts
     let app: Router = Router::new()
         .route(
-            "/spotify",
-            get(move || async { get_current_track_id(spc).await }).options(move || async {
+            svc.clone().domain.as_str(),
+            get(move || async {
+                handle_api_response(
+                    CONFIG.service.clone(),
+                    gae_wrapper(
+                        CONFIG.service.clone().target,
+                        spc,
+                        CONFIG.service.clone().endpoint,
+                    )
+                    .await,
+                )
+                .await
+            })
+            .options(move || async {
                 let mut headers = HeaderMap::new();
                 headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
                 headers.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, "*".parse().unwrap());
@@ -56,7 +82,10 @@ async fn main() {
                 write_tokens(azd, query.unwrap()).await
             }),
         );
-    let addr = SocketAddr::from(([127, 0, 0, 1], 80));
+    let addr = SocketAddr::from((
+        CONFIG.routing.get("http").unwrap().0,
+        CONFIG.routing.get("http").unwrap().1,
+    ));
     match axum_server::bind(addr).serve(app.into_make_service()).await {
         _ => (), // this is a gross way of getting rust to stop yelling at us for not handling errors.
                  // to be fair, this is also a gross way of (not) handling errors.
@@ -82,7 +111,7 @@ async fn authorize(tokens: Arc<AuthState>) -> impl IntoResponse {
             (spotify::get_authorization_code(
                 spotify::read_client_from_file(None),
                 Some(vec!["user-read-currently-playing"]),
-                REDIRECT_URI,
+                REDIRECT_URI.as_str(),
             )
             .as_str()
             .to_owned()
@@ -106,14 +135,25 @@ async fn authorize(tokens: Arc<AuthState>) -> impl IntoResponse {
 /// Has you pass in the finished OAuth token for authorization.
 /// Basically just a wrapper around spotify::get_api_endpoint and spotify::retrieve_json_value.
 /// The token value is only being read, so it's fine to pass it through as a string.
-async fn get_current_track_id(tokens: Arc<AuthState>) -> impl IntoResponse {
-    let resp = spotify::get_api_endpoint(
-        false,
-        tokens.retrieve(Token::AccessToken).as_str(),
-        TRACK_URL,
+// async fn get_current_track_id(tokens: Arc<AuthState>) -> impl IntoResponse {
+//     let resp = spotify::get_api_endpoint(
+//         false,
+//         tokens.retrieve(Token::AccessToken).as_str(),
+//         TRACK_URL,
+//     )
+//     .await;
+// }
+//
+async fn gae_wrapper(target: String, aut: Arc<AuthState>, endpoint: String) -> Response {
+    get_api_endpoint(
+        target == "accounts",
+        &aut.retrieve(Token::AccessToken),
+        endpoint.as_str(),
     )
-    .await;
+    .await
+}
 
+async fn handle_api_response(service: Service, resp: Response) -> impl IntoResponse {
     match resp.status() {
         reqsc::NO_CONTENT => axum::http::StatusCode::NO_CONTENT.into_response(),
         reqsc::OK => {
@@ -126,10 +166,10 @@ async fn get_current_track_id(tokens: Arc<AuthState>) -> impl IntoResponse {
                     &resp
                         .json::<Value>()
                         .await
-                        .expect("Failed to parse JSON in track request response!"),
-                    &["item", "id"],
+                        .expect("Failed to parse JSON in request response!"),
+                    &service.extract.split("/").collect::<Vec<&str>>(),
                 )
-                .expect("Item ID not present in track request response!")
+                .expect("Item ID not present in request response!")
                 .to_string(),
             )
                 .into_response()
@@ -160,7 +200,7 @@ async fn write_tokens(tokens: Arc<AuthState>, query: Query<Value>) -> String {
                 let response = spotify::redeem_authorization_code_for_access_token(
                     code,
                     spotify::read_creds_from_file(None),
-                    REDIRECT_URI,
+                    REDIRECT_URI.as_str(),
                     false,
                 )
                 .await;
@@ -206,7 +246,7 @@ async fn refresh_tokens(tokens: Arc<AuthState>) -> () {
     let response = spotify::redeem_authorization_code_for_access_token(
         tokens.retrieve(Token::RefreshToken).as_str(),
         spotify::read_creds_from_file(None),
-        REDIRECT_URI,
+        REDIRECT_URI.as_str(),
         true,
     )
     .await;
@@ -232,13 +272,11 @@ async fn refresh_tokens(tokens: Arc<AuthState>) -> () {
 
 fn strip_quotes(problematic_string: &String) -> String {
     let mut local_problem = problematic_string.clone();
-    while local_problem.chars().nth(0) == Some('\"') || local_problem.chars().nth(0) == Some('\'')
-    {
+    while local_problem.chars().nth(0) == Some('\"') || local_problem.chars().nth(0) == Some('\'') {
         local_problem.remove(0);
     }
 
-    while local_problem.chars().last() == Some('\"') || local_problem.chars().last() == Some('\'')
-    {
+    while local_problem.chars().last() == Some('\"') || local_problem.chars().last() == Some('\'') {
         local_problem.pop();
     }
 
