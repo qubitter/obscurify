@@ -88,8 +88,10 @@ async fn main() {
     match https {
         Some(https_config) => {
             let https = tokio::spawn(serve::https_server(https_config, app, CONFIG.clone()));
-            let http = tokio::spawn(serve::http_server(CONFIG.clone()));
-            let _ = tokio::join!(http, https);
+            // let http = tokio::spawn(serve::http_server(CONFIG.clone()));
+            let (fst) = tokio::join!(https);
+            dbg!(fst);
+            // dbg!(snd);
         }
         None => {
             let addr = SocketAddr::from((
