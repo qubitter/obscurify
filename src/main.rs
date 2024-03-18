@@ -87,8 +87,9 @@ async fn main() {
         );
     match https {
         Some(https_config) => {
-            tokio::spawn(serve::https_server(https_config, app, CONFIG.clone()));
-            tokio::spawn(serve::http_server(CONFIG.clone()));
+            let https = tokio::spawn(serve::https_server(https_config, app, CONFIG.clone()));
+            let http = tokio::spawn(serve::http_server(CONFIG.clone()));
+            let _ = tokio::join!(http, https);
         }
         None => {
             let addr = SocketAddr::from((
