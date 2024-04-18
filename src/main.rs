@@ -87,11 +87,16 @@ async fn main() {
         );
     match https {
         Some(https_config) => {
-            let https = tokio::spawn(serve::https_server(https_config, app, CONFIG.clone()));
-            // let http = tokio::spawn(serve::http_server(CONFIG.clone()));
-            let (fst) = tokio::join!(https);
-            dbg!(fst);
-            // dbg!(snd);
+            let addr = SocketAddr::from(*CONFIG.routing.get("https").unwrap());
+            let config = RustlsConfig::from_pem_file(https_config.cert, https_config.key)
+                .await
+                .unwrap();
+            match axum_server::bind_rustls(addr, config)
+                .serve(app.into_make_service())
+                .await
+            {
+                _ => (),
+            }
         }
         None => {
             let addr = SocketAddr::from((
