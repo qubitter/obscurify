@@ -171,11 +171,14 @@ async fn gae_wrapper(target: String, aut: Arc<AuthState>, endpoint: String) -> R
 }
 
 async fn handle_api_response(service: Service, resp: Response) -> impl IntoResponse {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        "allalike.org".parse().unwrap(),
+    );
     match resp.status() {
-        reqsc::NO_CONTENT => axum::http::StatusCode::NO_CONTENT.into_response(),
+        reqsc::NO_CONTENT => (headers, axum::http::StatusCode::NO_CONTENT).into_response(),
         reqsc::OK => {
-            let mut headers = HeaderMap::new();
-            headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
             // FIXME: Make this logging arbitrary for request type.
             (
                 headers,
@@ -187,11 +190,12 @@ async fn handle_api_response(service: Service, resp: Response) -> impl IntoRespo
                     &service.extract.split("/").collect::<Vec<&str>>(),
                 )
                 .expect("Item ID not present in request response!")
-                .to_string(),
+                .to_string()
+                .replace("\"", ""),
             )
                 .into_response()
         }
-        _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(), // don't worry about it
+        _ => (headers, axum::http::StatusCode::INTERNAL_SERVER_ERROR).into_response(), // don't worry about it
     }
 }
 
